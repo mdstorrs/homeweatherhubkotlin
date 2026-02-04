@@ -34,9 +34,9 @@ class MainActivity : ComponentActivity() {
                     onOpenSettings = viewModel::openSettings,
                     onSettingsDismiss = viewModel::closeSettings,
                     onSettingsSave = viewModel::applySettings,
-                    onOpenAbout = { /* TODO: Navigate to about */ },
                     onOpenStationList = viewModel::openStationList,
-                    onTabSelected = viewModel::selectTab
+                    onTabSelected = viewModel::selectTab,
+                    onExit = { finish() }
                 )
             }
         }
@@ -52,13 +52,14 @@ fun MainScaffold(
     onOpenSettings: () -> Unit,
     onSettingsDismiss: () -> Unit,
     onSettingsSave: (ThemeMode, Int) -> Unit,
-    onOpenAbout: () -> Unit,
     onOpenStationList: () -> Unit,
-    onTabSelected: (WeatherTab) -> Unit
+    onTabSelected: (WeatherTab) -> Unit,
+    onExit: () -> Unit
 ) {
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     val stationListUiState by viewModel.stationListUiState.collectAsState()
+    var isAboutOpen by remember { mutableStateOf(false) }
 
     if (uiState.isSettingsOpen) {
         SettingsDialog(
@@ -69,6 +70,10 @@ fun MainScaffold(
         )
     }
 
+    if (isAboutOpen) {
+        AboutDialog(onDismiss = { isAboutOpen = false })
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -76,8 +81,11 @@ fun MainScaffold(
                 TextButton(onClick = { scope.launch { drawerState.close() }; onOpenSettings() }) {
                     Text("Settings")
                 }
-                TextButton(onClick = { scope.launch { drawerState.close() }; onOpenAbout() }) {
+                TextButton(onClick = { scope.launch { drawerState.close() }; isAboutOpen = true }) {
                     Text("About")
+                }
+                TextButton(onClick = { scope.launch { drawerState.close() }; onExit() }) {
+                    Text("Exit")
                 }
             }
         }
@@ -86,7 +94,12 @@ fun MainScaffold(
             topBar = {
                 TopAppBar(
                     title = {
-                        Text(uiState.selectedStation?.name ?: "Select Station")
+                        val titleText = if (uiState.selectedStation == null || uiState.isStationListOpen) {
+                            "Search"
+                        } else {
+                            uiState.selectedStation.name
+                        }
+                        Text(titleText)
                     },
                     navigationIcon = {
                         IconButton(onClick = onOpenStationList) {

@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
@@ -82,7 +83,10 @@ private fun SettingOptionRow(
     selected: Boolean,
     onClick: () -> Unit
 ) {
-    Row(modifier = Modifier.padding(vertical = 4.dp)) {
+    Row(
+        modifier = Modifier.padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
         RadioButton(selected = selected, onClick = onClick)
         Text(
             text = text,

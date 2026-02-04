@@ -27,6 +27,7 @@ fun StationSelectionScreen(
 ) {
     var searchText by rememberSaveable { mutableStateOf(stationListUiState.filter) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val valueColor = MaterialTheme.colorScheme.onSurface
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
         OutlinedTextField(
@@ -64,8 +65,12 @@ fun StationSelectionScreen(
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
                             Text(station.name, style = MaterialTheme.typography.titleMedium)
-                            station.address?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                            station.coordinates?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                            station.address?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = valueColor)
+                            }
+                            station.coordinates?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, color = valueColor)
+                            }
                         }
                     }
                 }

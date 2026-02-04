@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -28,15 +29,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.layout.width
-import com.google.accompanist.swiperefresh.SwipeRefresh
-import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material.ExperimentalMaterialApi
 
 private val MinMaxColumnWidth = 110.dp
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
 fun HistoryScreen(
     report: HistoryReport?,
@@ -52,13 +55,12 @@ fun HistoryScreen(
     modifier: Modifier = Modifier
 ) {
     val canSwipeRefresh = report != null
-    val refreshState = rememberSwipeRefreshState(isRefreshing = isLoading && canSwipeRefresh)
-    SwipeRefresh(
-        state = refreshState,
-        onRefresh = onRefresh,
-        swipeEnabled = canSwipeRefresh,
-        modifier = modifier.fillMaxSize()
-    ) {
+    val refreshState = rememberPullRefreshState(
+        refreshing = isLoading && canSwipeRefresh,
+        onRefresh = onRefresh
+    )
+    val valueColor = MaterialTheme.colorScheme.onSurface
+    Box(modifier = modifier.fillMaxSize().pullRefresh(refreshState, enabled = canSwipeRefresh)) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
             when {
                 isLoading && report == null -> {
@@ -90,9 +92,9 @@ fun HistoryScreen(
                                 rows = listOf(
                                     Triple("OUTSIDE", withTempSymbol(report.outsideTemperatureMin, report.measurementSymbol), withTempSymbol(report.outsideTemperatureMax, report.measurementSymbol)),
                                     Triple("INSIDE", withTempSymbol(report.insideTemperatureMin, report.measurementSymbol), withTempSymbol(report.insideTemperatureMax, report.measurementSymbol))
+                                ),
+                                valueColor = valueColor
                             )
-                        )
-                            Spacer(modifier = Modifier.height(12.dp))
                         }
                         item {
                             SectionMinMaxCard(
@@ -102,7 +104,8 @@ fun HistoryScreen(
                                     Triple("RATE", "", report.rainRateMax)
                                 ),
                                 minLabel = "",
-                                maxLabel = "Max"
+                                maxLabel = "Max",
+                                valueColor = valueColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -115,7 +118,8 @@ fun HistoryScreen(
                                     Triple("AVG. DIRECTION", "", report.windDirectionAvg)
                                 ),
                                 minLabel = "",
-                                maxLabel = "Max"
+                                maxLabel = "Max",
+                                valueColor = valueColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -125,7 +129,8 @@ fun HistoryScreen(
                                 rows = listOf(
                                     Triple("OUTSIDE", report.outsideHumidityMin, report.outsideHumidityMax),
                                     Triple("INSIDE", report.insideHumidityMin, report.insideHumidityMax)
-                                )
+                                ),
+                                valueColor = valueColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -135,7 +140,8 @@ fun HistoryScreen(
                                 rows = listOf(
                                     Triple("PRESSURE", report.pressureMin, report.pressureMax),
                                     Triple("UV INDEX", "-", report.uvIndexMax.toString())
-                                )
+                                ),
+                                valueColor = valueColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -152,7 +158,12 @@ fun HistoryScreen(
                 }
             }
         }
-     }
+        PullRefreshIndicator(
+            refreshing = isLoading && canSwipeRefresh,
+            state = refreshState,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
+    }
 }
 
 @Composable
@@ -180,7 +191,8 @@ private fun SectionMinMaxCard(
     title: String,
     rows: List<Triple<String, String, String>>,
     minLabel: String = "Min",
-    maxLabel: String = "Max"
+    maxLabel: String = "Max",
+    valueColor: Color
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -199,6 +211,7 @@ private fun SectionMinMaxCard(
                             Text(
                                 text = minLabel,
                                 style = MaterialTheme.typography.labelMedium,
+                                color = valueColor,
                                 modifier = Modifier.width(MinMaxColumnWidth),
                                 textAlign = TextAlign.End
                             )
@@ -207,6 +220,7 @@ private fun SectionMinMaxCard(
                             Text(
                                 text = maxLabel,
                                 style = MaterialTheme.typography.labelMedium,
+                                color = valueColor,
                                 modifier = Modifier.width(MinMaxColumnWidth),
                                 textAlign = TextAlign.End
                             )
@@ -216,24 +230,32 @@ private fun SectionMinMaxCard(
             }
             Spacer(modifier = Modifier.height(4.dp))
             rows.forEach { row ->
-                MinMaxRow(label = row.first, min = row.second, max = row.third, minLabel = minLabel, maxLabel = maxLabel)
+                MinMaxRow(label = row.first, min = row.second, max = row.third, minLabel = minLabel, maxLabel = maxLabel, valueColor = valueColor)
             }
         }
     }
 }
 
 @Composable
-private fun MinMaxRow(label: String, min: String, max: String, minLabel: String, maxLabel: String) {
+private fun MinMaxRow(
+    label: String,
+    min: String,
+    max: String,
+    minLabel: String,
+    maxLabel: String,
+    valueColor: Color
+) {
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(text = label, style = MaterialTheme.typography.bodyMedium)
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = valueColor)
         Row(horizontalArrangement = Arrangement.End) {
             if (minLabel.isNotBlank()) {
                 Text(
                     text = min,
                     style = MaterialTheme.typography.bodyMedium,
+                    color = valueColor,
                     modifier = Modifier.width(MinMaxColumnWidth),
                     textAlign = TextAlign.End
                 )
@@ -242,6 +264,7 @@ private fun MinMaxRow(label: String, min: String, max: String, minLabel: String,
                 Text(
                     text = max,
                     style = MaterialTheme.typography.bodyMedium,
+                    color = valueColor,
                     modifier = Modifier.width(MinMaxColumnWidth),
                     textAlign = TextAlign.End
                 )
