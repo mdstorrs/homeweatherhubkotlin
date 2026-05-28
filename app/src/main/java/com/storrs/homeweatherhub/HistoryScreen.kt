@@ -31,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -95,6 +96,7 @@ fun HistoryScreen(
                                 ),
                                 valueColor = valueColor
                             )
+                            Spacer(modifier = Modifier.height(12.dp))
                         }
                         item {
                             SectionMinMaxCard(
@@ -284,31 +286,36 @@ private fun HistoryControlsRow(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val options = HistoryPeriod.entries.toList()
+    val controlHeight = 56.dp
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Button(
             onClick = onPrev,
             enabled = period != HistoryPeriod.ALL,
-            modifier = Modifier.width(120.dp)
+            modifier = Modifier
+                .weight(1f)
+                .height(controlHeight)
         ) {
-            Text("BACK")
+            Text("BACK", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         ExposedDropdownMenuBox(
             expanded = expanded,
-            onExpandedChange = { expanded = !expanded }
+            onExpandedChange = { expanded = !expanded },
+            modifier = Modifier.weight(1.25f)
         ) {
             OutlinedTextField(
                 value = period.label,
                 onValueChange = {},
                 readOnly = true,
+                singleLine = true,
                 modifier = Modifier
                     .menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled = true)
-                    .width(190.dp)
-                    .padding(horizontal = 8.dp)
+                    .fillMaxWidth()
+                    .height(controlHeight)
             )
             ExposedDropdownMenu(
                 expanded = expanded,
@@ -328,9 +335,11 @@ private fun HistoryControlsRow(
         Button(
             onClick = onNext,
             enabled = nextEnabled,
-            modifier = Modifier.width(120.dp)
+            modifier = Modifier
+                .weight(1f)
+                .height(controlHeight)
         ) {
-            Text("NEXT")
+            Text("NEXT", maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

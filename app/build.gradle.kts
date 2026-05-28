@@ -1,6 +1,32 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+val generatedVersionCode = providers.gradleProperty("VERSION_CODE")
+    .orNull
+    ?.toIntOrNull()
+    ?: ((System.currentTimeMillis() / 1000L).toInt())
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+gradle.taskGraph.whenReady {
+    val releaseTasksRequested = allTasks.any { task ->
+        task.name.contains("Release", ignoreCase = true)
+    }
+
+    if (releaseTasksRequested && !keystorePropertiesFile.exists()) {
+        throw IllegalStateException(
+            "Missing keystore.properties at the project root. Create it before building release bundles."
+        )
+    }
 }
 
 android {
@@ -13,14 +39,29 @@ android {
         applicationId = "com.storrs.homeweatherhub"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = generatedVersionCode
+        versionName = "0.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.create("release") {
+                    keyAlias = keystoreProperties.getProperty("keyAlias")
+                        ?: error("Missing keyAlias in keystore.properties")
+                    keyPassword = keystoreProperties.getProperty("keyPassword")
+                        ?: error("Missing keyPassword in keystore.properties")
+                    storeFile = rootProject.file(
+                        keystoreProperties.getProperty("storeFile")
+                            ?: error("Missing storeFile in keystore.properties")
+                    )
+                    storePassword = keystoreProperties.getProperty("storePassword")
+                        ?: error("Missing storePassword in keystore.properties")
+                }
+            }
+
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -48,7 +89,7 @@ dependencies {
     implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.compose.material)
     implementation(libs.androidx.core.splashscreen)
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

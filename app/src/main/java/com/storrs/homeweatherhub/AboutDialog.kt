@@ -26,7 +26,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
             @Suppress("DEPRECATION")
             context.packageManager.getPackageInfo(context.packageName, 0).versionName
         }
-    }.getOrNull() ?: "1.0"
+    }.getOrNull() ?: "0.0.1"
 
     AlertDialog(
         onDismissRequest = onDismiss,

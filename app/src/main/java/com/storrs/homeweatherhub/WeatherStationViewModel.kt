@@ -2,10 +2,13 @@ package com.storrs.homeweatherhub
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.Period
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -108,6 +111,8 @@ enum class HistoryPeriod(val apiValue: Int, val label: String, val step: Period)
 }
 
 class WeatherStationViewModel : ViewModel() {
+    private val labelDateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)
+
     private val _uiState = MutableStateFlow(WeatherStationUiState())
     val uiState: StateFlow<WeatherStationUiState> = _uiState.asStateFlow()
 
@@ -323,7 +328,7 @@ class WeatherStationViewModel : ViewModel() {
                 measurement = measurement
             )
             if (result.success && result.report != null) {
-                val rangeLabel = buildHistoryRangeLabel(result.report.startDate, result.report.endDate)
+                val rangeLabel = buildHistoryRangeLabel(result.report.startDate, result.report.endDate, period, startDate)
                 _uiState.value = _uiState.value.copy(
                     historyReport = result.report,
                     historyLoading = false,
@@ -345,9 +350,9 @@ class WeatherStationViewModel : ViewModel() {
     private fun defaultStartDate(period: HistoryPeriod, today: LocalDate): LocalDate {
         return when (period) {
             HistoryPeriod.DAY -> today
-            HistoryPeriod.WEEK -> today.minusDays(6)
-            HistoryPeriod.MONTH -> today.minusMonths(1).plusDays(1)
-            HistoryPeriod.YEAR -> today.minusYears(1).plusDays(1)
+            HistoryPeriod.WEEK -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            HistoryPeriod.MONTH -> today.withDayOfMonth(1)
+            HistoryPeriod.YEAR -> today.withDayOfYear(1)
             HistoryPeriod.ALL -> today
         }
     }
@@ -365,18 +370,66 @@ class WeatherStationViewModel : ViewModel() {
         return endDate.isBefore(today)
     }
 
-    private fun buildHistoryRangeLabel(startDate: String, endDate: String): String {
+    private fun buildHistoryRangeLabel(startDate: String, endDate: String, period: HistoryPeriod, requestedStart: LocalDate? = null): String {
+        if (period == HistoryPeriod.DAY) {
+            val day = requestedStart ?: parseHistoryDate(startDate) ?: return ""
+            val today = LocalDate.now()
+            return when (day) {
+                today -> "Today"
+                today.minusDays(1) -> "Yesterday"
+                else -> day.format(labelDateFormatter)
+            }
+        }
+
+        if (period == HistoryPeriod.WEEK) {
+            val weekStart = requestedStart ?: parseHistoryDate(startDate) ?: return ""
+            val today = LocalDate.now()
+            val thisWeekMonday = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+            val lastWeekMonday = thisWeekMonday.minusWeeks(1)
+            return when (weekStart) {
+                thisWeekMonday -> "This Week (Mon-Sun)"
+                lastWeekMonday -> "Last Week (Mon-Sun)"
+                else -> {
+                    val start = parseDateLabel(startDate)
+                    val end = parseDateLabel(endDate)
+                    if (start.isNotBlank() && end.isNotBlank()) "$start to $end" else ""
+                }
+            }
+        }
+
+        if (period == HistoryPeriod.MONTH) {
+            val date = requestedStart ?: parseHistoryDate(startDate) ?: return ""
+            return date.format(DateTimeFormatter.ofPattern("MMMM yyyy"))
+        }
+
+        if (period == HistoryPeriod.YEAR) {
+            val date = requestedStart ?: parseHistoryDate(startDate) ?: return ""
+            return date.year.toString()
+        }
+
+        if (period == HistoryPeriod.ALL) {
+            return "All"
+        }
+
         val start = parseDateLabel(startDate)
         val end = parseDateLabel(endDate)
         return if (start.isNotBlank() && end.isNotBlank()) "$start to $end" else ""
     }
 
-    private fun parseDateLabel(value: String): String {
+    private fun parseHistoryDate(value: String): LocalDate? {
         return try {
-            val dt = LocalDateTime.parse(value)
-            dt.toLocalDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
+            LocalDateTime.parse(value).toLocalDate()
         } catch (e: Exception) {
-            value
+            try {
+                LocalDate.parse(value)
+            } catch (_: Exception) {
+                null
+            }
         }
+    }
+
+    private fun parseDateLabel(value: String): String {
+        val date = parseHistoryDate(value) ?: return value
+        return date.format(labelDateFormatter)
     }
 }
