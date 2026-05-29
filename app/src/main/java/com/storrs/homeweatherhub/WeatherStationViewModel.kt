@@ -1,6 +1,7 @@
 package com.storrs.homeweatherhub
 
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -110,7 +111,7 @@ enum class HistoryPeriod(val apiValue: Int, val label: String, val step: Period)
     ALL(5, "All", Period.ZERO)
 }
 
-class WeatherStationViewModel : ViewModel() {
+class WeatherStationViewModel(application: Application) : AndroidViewModel(application) {
     private val labelDateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)
 
     private val _uiState = MutableStateFlow(WeatherStationUiState())
@@ -120,9 +121,27 @@ class WeatherStationViewModel : ViewModel() {
     val stationListUiState: StateFlow<StationListUiState> = _stationListUiState.asStateFlow()
 
     init {
-        // TODO: Load stations and selected station from DataStore
+        restoreSelectedStation()
         loadStations()
-        loadStationsPage()
+    }
+
+    private fun restoreSelectedStation() {
+        viewModelScope.launch {
+            val context = getApplication<Application>().applicationContext
+            val savedStation = DataStoreManager.loadSelectedStation(context)
+            if (savedStation == null) {
+                _uiState.value = _uiState.value.copy(isStationListOpen = true)
+                loadStationsPage()
+                return@launch
+            }
+
+            _uiState.value = _uiState.value.copy(
+                selectedStation = savedStation,
+                isStationListOpen = false
+            )
+            loadCurrentWeather(savedStation)
+            loadHistory(savedStation, _uiState.value.historyPeriod, _uiState.value.historyStartDate)
+        }
     }
 
     fun loadStations() {
@@ -139,9 +158,12 @@ class WeatherStationViewModel : ViewModel() {
 
     fun selectStation(station: WeatherStation) {
         _uiState.value = _uiState.value.copy(selectedStation = station, isStationListOpen = false)
+        viewModelScope.launch {
+            val context = getApplication<Application>().applicationContext
+            DataStoreManager.saveSelectedStation(context, station)
+        }
         loadCurrentWeather(station)
         loadHistory(station, _uiState.value.historyPeriod, _uiState.value.historyStartDate)
-        // TODO: Save to DataStore
     }
 
     fun openStationList() {

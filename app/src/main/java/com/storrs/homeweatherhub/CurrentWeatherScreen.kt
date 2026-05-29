@@ -20,8 +20,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -42,7 +44,8 @@ fun CurrentWeatherScreen(
     modifier: Modifier = Modifier
 ) {
     val canSwipeRefresh = weather != null
-    val valueColor = MaterialTheme.colorScheme.onSurface
+    val valueColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val headerColor = MaterialTheme.colorScheme.tertiary
     val refreshState = rememberPullRefreshState(
         refreshing = isLoading && canSwipeRefresh,
         onRefresh = onRefresh
@@ -75,7 +78,8 @@ fun CurrentWeatherScreen(
                                 humidityOutside = weather.humidityOutside,
                                 lastUpdated = formattedLastUpdated,
                                 measurementSymbol = weather.measurementSymbol,
-                                valueColor = valueColor
+                                valueColor = valueColor,
+                                headerColor = headerColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -113,7 +117,7 @@ fun CurrentWeatherScreen(
                         )
 
                         items(sections) { section ->
-                            SectionCard(section = section, valueColor = valueColor)
+                            SectionCard(section = section, valueColor = valueColor, headerColor = headerColor)
                             Spacer(modifier = Modifier.height(12.dp))
                         }
                     }
@@ -139,7 +143,8 @@ private fun CurrentConditionsCard(
     humidityOutside: String,
     lastUpdated: String,
     measurementSymbol: String,
-    valueColor: Color
+    valueColor: Color,
+    headerColor: Color
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -148,8 +153,8 @@ private fun CurrentConditionsCard(
         Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp, horizontal = 16.dp)) {
             Text(
                 text = "Current Conditions",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                color = headerColor,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center
             )
@@ -205,7 +210,7 @@ private fun CurrentConditionsCard(
 }
 
 @Composable
-private fun SectionCard(section: WeatherSection, valueColor: Color) {
+private fun SectionCard(section: WeatherSection, valueColor: Color, headerColor: Color) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -213,8 +218,11 @@ private fun SectionCard(section: WeatherSection, valueColor: Color) {
         Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
             Text(
                 text = section.title,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.8.sp
+                ),
+                color = headerColor,
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(6.dp))

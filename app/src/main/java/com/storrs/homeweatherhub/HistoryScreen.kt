@@ -30,9 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -60,7 +62,8 @@ fun HistoryScreen(
         refreshing = isLoading && canSwipeRefresh,
         onRefresh = onRefresh
     )
-    val valueColor = MaterialTheme.colorScheme.onSurface
+    val valueColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val headerColor = MaterialTheme.colorScheme.tertiary
     Box(modifier = modifier.fillMaxSize().pullRefresh(refreshState, enabled = canSwipeRefresh)) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
             when {
@@ -83,7 +86,8 @@ fun HistoryScreen(
                         item {
                             HistoryHeaderCard(
                                 title = report.wsName,
-                                dateRangeLabel = dateRangeLabel
+                                dateRangeLabel = dateRangeLabel,
+                                headerColor = headerColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -94,7 +98,8 @@ fun HistoryScreen(
                                     Triple("OUTSIDE", withTempSymbol(report.outsideTemperatureMin, report.measurementSymbol), withTempSymbol(report.outsideTemperatureMax, report.measurementSymbol)),
                                     Triple("INSIDE", withTempSymbol(report.insideTemperatureMin, report.measurementSymbol), withTempSymbol(report.insideTemperatureMax, report.measurementSymbol))
                                 ),
-                                valueColor = valueColor
+                                valueColor = valueColor,
+                                headerColor = headerColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -107,7 +112,8 @@ fun HistoryScreen(
                                 ),
                                 minLabel = "",
                                 maxLabel = "Max",
-                                valueColor = valueColor
+                                valueColor = valueColor,
+                                headerColor = headerColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -121,7 +127,8 @@ fun HistoryScreen(
                                 ),
                                 minLabel = "",
                                 maxLabel = "Max",
-                                valueColor = valueColor
+                                valueColor = valueColor,
+                                headerColor = headerColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -132,7 +139,8 @@ fun HistoryScreen(
                                     Triple("OUTSIDE", report.outsideHumidityMin, report.outsideHumidityMax),
                                     Triple("INSIDE", report.insideHumidityMin, report.insideHumidityMax)
                                 ),
-                                valueColor = valueColor
+                                valueColor = valueColor,
+                                headerColor = headerColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -143,7 +151,8 @@ fun HistoryScreen(
                                     Triple("PRESSURE", report.pressureMin, report.pressureMax),
                                     Triple("UV INDEX", "-", report.uvIndexMax.toString())
                                 ),
-                                valueColor = valueColor
+                                valueColor = valueColor,
+                                headerColor = headerColor
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                         }
@@ -169,7 +178,7 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun HistoryHeaderCard(title: String, dateRangeLabel: String) {
+private fun HistoryHeaderCard(title: String, dateRangeLabel: String, headerColor: Color) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -178,8 +187,8 @@ private fun HistoryHeaderCard(title: String, dateRangeLabel: String) {
              if (dateRangeLabel.isNotBlank()) {
                  Text(
                      text = dateRangeLabel,
-                     style = MaterialTheme.typography.titleSmall,
-                     color = MaterialTheme.colorScheme.primary,
+                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold),
+                     color = headerColor,
                      modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                      textAlign = TextAlign.Center
                  )
@@ -194,7 +203,8 @@ private fun SectionMinMaxCard(
     rows: List<Triple<String, String, String>>,
     minLabel: String = "Min",
     maxLabel: String = "Max",
-    valueColor: Color
+    valueColor: Color,
+    headerColor: Color
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -204,8 +214,11 @@ private fun SectionMinMaxCard(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
+                    style = MaterialTheme.typography.labelLarge.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.8.sp
+                    ),
+                    color = headerColor
                 )
                 if (minLabel.isNotBlank() || maxLabel.isNotBlank()) {
                     Row(modifier = Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
