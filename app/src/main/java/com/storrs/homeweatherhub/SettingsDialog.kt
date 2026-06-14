@@ -1,15 +1,20 @@
 package com.storrs.homeweatherhub
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsDialog(
     currentTheme: ThemeMode,
@@ -29,52 +35,72 @@ fun SettingsDialog(
     var selectedTheme by remember(currentTheme) { mutableStateOf(currentTheme) }
     var selectedMeasurement by remember(currentMeasurement) { mutableStateOf(currentMeasurement) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(text = "Settings") },
-        text = {
-            Column {
-                Text(
-                    text = "Appearance",
-                    style = MaterialTheme.typography.titleMedium
-                )
-                ThemeMode.values().forEach { mode ->
-                    val label = when (mode) {
-                        ThemeMode.SYSTEM -> "Use System"
-                        ThemeMode.LIGHT -> "Light"
-                        ThemeMode.DARK -> "Dark"
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = {},
+                navigationIcon = {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        Text("Close")
                     }
-                    SettingOptionRow(
-                        text = label,
-                        selected = selectedTheme == mode,
-                        onClick = { selectedTheme = mode }
-                    )
+                },
+                actions = {
+                    TextButton(
+                        onClick = { onSave(selectedTheme, selectedMeasurement) },
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text("Done")
+                    }
                 }
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Units",
-                    style = MaterialTheme.typography.titleMedium
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp)
+        ) {
+            Text(
+                text = "Settings",
+                style = MaterialTheme.typography.headlineSmall
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Appearance",
+                style = MaterialTheme.typography.titleMedium
+            )
+            ThemeMode.values().forEach { mode ->
+                val label = when (mode) {
+                    ThemeMode.SYSTEM -> "Use System"
+                    ThemeMode.LIGHT -> "Light"
+                    ThemeMode.DARK -> "Dark"
+                }
+                SettingOptionRow(
+                    text = label,
+                    selected = selectedTheme == mode,
+                    onClick = { selectedTheme = mode }
                 )
-                listOf(1 to "Metric", 0 to "Freedom Units").forEach { (value, label) ->
-                    SettingOptionRow(
-                        text = label,
-                        selected = selectedMeasurement == value,
-                        onClick = { selectedMeasurement = value }
-                    )
-                }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(selectedTheme, selectedMeasurement) }) {
-                Text("Save")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Units",
+                style = MaterialTheme.typography.titleMedium
+            )
+            listOf(1 to "Metric", 0 to "Freedom Units").forEach { (value, label) ->
+                SettingOptionRow(
+                    text = label,
+                    selected = selectedMeasurement == value,
+                    onClick = { selectedMeasurement = value }
+                )
             }
         }
-    )
+    }
 }
 
 @Composable
