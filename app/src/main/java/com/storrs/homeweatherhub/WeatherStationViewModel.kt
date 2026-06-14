@@ -20,7 +20,13 @@ data class WeatherStation(
     val id: String,
     val name: String,
     val address: String? = null,
-    val coordinates: String? = null
+    val coordinates: String? = null,
+    val hasPower: Boolean = false,
+    val settings: List<StationSetting> = emptyList()
+)
+data class StationSetting(
+    val key: String,
+    val value: String
 )
 data class CurrentWeather(
     val serverTime: String,
@@ -44,7 +50,7 @@ data class CurrentWeather(
     val measurement: Int,
     val measurementSymbol: String
 )
-enum class WeatherTab { CURRENT, HISTORY }
+enum class WeatherTab { CURRENT, HISTORY, POWER_USAGE }
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 data class WeatherStationUiState(
@@ -64,7 +70,10 @@ data class WeatherStationUiState(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val selectedTab: WeatherTab = WeatherTab.CURRENT,
     val measurementSystem: Int = 1,
-    val isSettingsOpen: Boolean = false
+    val isSettingsOpen: Boolean = false,
+    val isStationSettingsOpen: Boolean = false,
+    val stationSettingsSaving: Boolean = false,
+    val stationSettingsError: String? = null
 )
 
 data class StationListUiState(
@@ -113,6 +122,7 @@ enum class HistoryPeriod(val apiValue: Int, val label: String, val step: Period)
 
 class WeatherStationViewModel(application: Application) : AndroidViewModel(application) {
     private val labelDateFormatter = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT)
+    private var stationDetailsLoading = false
 
     private val _uiState = MutableStateFlow(WeatherStationUiState())
     val uiState: StateFlow<WeatherStationUiState> = _uiState.asStateFlow()
@@ -137,7 +147,8 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
 
             _uiState.value = _uiState.value.copy(
                 selectedStation = savedStation,
-                isStationListOpen = false
+                isStationListOpen = false,
+                selectedTab = sanitizeTabSelection(_uiState.value.selectedTab, savedStation)
             )
             loadCurrentWeather(savedStation)
             loadHistory(savedStation, _uiState.value.historyPeriod, _uiState.value.historyStartDate)
@@ -157,7 +168,11 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun selectStation(station: WeatherStation) {
-        _uiState.value = _uiState.value.copy(selectedStation = station, isStationListOpen = false)
+        _uiState.value = _uiState.value.copy(
+            selectedStation = station,
+            isStationListOpen = false,
+            selectedTab = sanitizeTabSelection(_uiState.value.selectedTab, station)
+        )
         viewModelScope.launch {
             val context = getApplication<Application>().applicationContext
             DataStoreManager.saveSelectedStation(context, station)
@@ -182,6 +197,24 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
         _uiState.value = _uiState.value.copy(isSettingsOpen = false)
     }
 
+    fun openStationSettings() {
+        val station = _uiState.value.selectedStation ?: return
+        _uiState.value = _uiState.value.copy(
+            selectedStation = station,
+            isStationSettingsOpen = true,
+            stationSettingsError = null
+        )
+        refreshSelectedStationDetails(showErrorInSettingsDialog = true)
+    }
+
+    fun closeStationSettings() {
+        _uiState.value = _uiState.value.copy(
+            isStationSettingsOpen = false,
+            stationSettingsSaving = false,
+            stationSettingsError = null
+        )
+    }
+
     fun applySettings(themeMode: ThemeMode, measurementSystem: Int) {
         _uiState.value = _uiState.value.copy(
             themeMode = themeMode,
@@ -200,17 +233,94 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
     }
 
     fun selectTab(tab: WeatherTab) {
+        val station = _uiState.value.selectedStation
+        if (tab == WeatherTab.POWER_USAGE && station?.hasPower != true) {
+            return
+        }
+
         _uiState.value = _uiState.value.copy(selectedTab = tab)
-        if (tab == WeatherTab.CURRENT) {
-            val station = _uiState.value.selectedStation
-            if (station != null && _uiState.value.currentWeather == null && !_uiState.value.currentWeatherLoading) {
-                loadCurrentWeather(station)
+
+        when (tab) {
+            WeatherTab.CURRENT -> {
+                if (station != null && _uiState.value.currentWeather == null && !_uiState.value.currentWeatherLoading) {
+                    loadCurrentWeather(station)
+                }
             }
-        } else if (tab == WeatherTab.HISTORY) {
-            val station = _uiState.value.selectedStation
-            if (station != null && _uiState.value.historyReport == null && !_uiState.value.historyLoading) {
-                loadHistory(station, _uiState.value.historyPeriod, _uiState.value.historyStartDate)
+            WeatherTab.HISTORY -> {
+                if (station != null && _uiState.value.historyReport == null && !_uiState.value.historyLoading) {
+                    loadHistory(station, _uiState.value.historyPeriod, _uiState.value.historyStartDate)
+                }
             }
+            WeatherTab.POWER_USAGE -> Unit
+        }
+
+        if (tab == WeatherTab.POWER_USAGE) {
+            refreshSelectedStationDetails(showErrorInSettingsDialog = false)
+        }
+    }
+
+    fun saveStationSettings(
+        stationId: String,
+        name: String,
+        address: String,
+        coordinates: String,
+        hasPower: Boolean,
+        settings: List<StationSetting>
+    ) {
+        val id = stationId.trim()
+        val idInt = id.toIntOrNull()
+        if (idInt == null) {
+            _uiState.value = _uiState.value.copy(stationSettingsError = "Station id must be a number")
+            return
+        }
+
+        val normalizedSettings = settings
+            .map { StationSetting(key = it.key.trim(), value = it.value.trim()) }
+            .filter { it.key.isNotBlank() }
+
+        val updatedStation = WeatherStation(
+            id = id,
+            name = name.trim(),
+            address = address.trim().ifBlank { null },
+            coordinates = coordinates.trim().ifBlank { null },
+            hasPower = hasPower,
+            settings = normalizedSettings
+        )
+
+        _uiState.value = _uiState.value.copy(
+            stationSettingsSaving = true,
+            stationSettingsError = null
+        )
+
+        viewModelScope.launch {
+
+            val updateSettingsResult = WeatherStationRepository.updateStationSettings(updatedStation)
+            if (!updateSettingsResult.success) {
+                _uiState.value = _uiState.value.copy(
+                    stationSettingsSaving = false,
+                    stationSettingsError = updateSettingsResult.error ?: updateSettingsResult.message ?: "Unable to update station settings"
+                )
+                return@launch
+            }
+
+            val currentState = _uiState.value
+            val selectedTab = sanitizeTabSelection(currentState.selectedTab, updatedStation)
+            _uiState.value = currentState.copy(
+                selectedStation = updatedStation,
+                selectedTab = selectedTab,
+                isStationSettingsOpen = false,
+                stationSettingsSaving = false,
+                stationSettingsError = null
+            )
+
+            _stationListUiState.value = _stationListUiState.value.copy(
+                stations = _stationListUiState.value.stations.map { existing ->
+                    if (existing.id == updatedStation.id) updatedStation else existing
+                }
+            )
+
+            val context = getApplication<Application>().applicationContext
+            DataStoreManager.saveSelectedStation(context, updatedStation)
         }
     }
 
@@ -453,5 +563,66 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
     private fun parseDateLabel(value: String): String {
         val date = parseHistoryDate(value) ?: return value
         return date.format(labelDateFormatter)
+    }
+
+    private fun sanitizeTabSelection(selectedTab: WeatherTab, station: WeatherStation?): WeatherTab {
+        if (selectedTab == WeatherTab.POWER_USAGE && station?.hasPower != true) {
+            return WeatherTab.CURRENT
+        }
+        return selectedTab
+    }
+
+    private fun refreshSelectedStationDetails(showErrorInSettingsDialog: Boolean) {
+        if (stationDetailsLoading) return
+        val currentStation = _uiState.value.selectedStation ?: return
+        val requestedStationId = currentStation.id.toIntOrNull() ?: return
+
+        stationDetailsLoading = true
+        viewModelScope.launch {
+            try {
+                val result = WeatherStationRepository.fetchStationById(requestedStationId)
+                if (result.success && result.station != null) {
+                    val latestSelectedId = _uiState.value.selectedStation?.id?.toIntOrNull()
+                    if (latestSelectedId != requestedStationId) {
+                        return@launch
+                    }
+
+                    val mergedStation = result.station.copy(
+                        id = result.station.id.ifBlank { currentStation.id },
+                        name = result.station.name.ifBlank { currentStation.name }
+                    )
+
+                    if (mergedStation.id.toIntOrNull() != requestedStationId) {
+                        if (showErrorInSettingsDialog) {
+                            _uiState.value = _uiState.value.copy(
+                                stationSettingsError = "Received station details for the wrong station"
+                            )
+                        }
+                        return@launch
+                    }
+
+                    val selectedTab = sanitizeTabSelection(_uiState.value.selectedTab, mergedStation)
+                    _uiState.value = _uiState.value.copy(
+                        selectedStation = mergedStation,
+                        selectedTab = selectedTab,
+                        stationSettingsError = null
+                    )
+                    _stationListUiState.value = _stationListUiState.value.copy(
+                        stations = _stationListUiState.value.stations.map { station ->
+                            if (station.id == mergedStation.id) mergedStation else station
+                        }
+                    )
+
+                    val context = getApplication<Application>().applicationContext
+                    DataStoreManager.saveSelectedStation(context, mergedStation)
+                } else if (showErrorInSettingsDialog) {
+                    _uiState.value = _uiState.value.copy(
+                        stationSettingsError = result.error ?: result.message ?: "Unable to load station settings"
+                    )
+                }
+            } finally {
+                stationDetailsLoading = false
+            }
+        }
     }
 }

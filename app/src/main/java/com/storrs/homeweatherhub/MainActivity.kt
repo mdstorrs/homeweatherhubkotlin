@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
@@ -13,8 +12,8 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.storrs.homeweatherhub.ui.theme.HomeWeatherHubTheme
 import kotlinx.coroutines.launch
@@ -32,8 +31,11 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     onStationSelected = viewModel::selectStation,
                     onOpenSettings = viewModel::openSettings,
+                    onOpenStationSettings = viewModel::openStationSettings,
                     onSettingsDismiss = viewModel::closeSettings,
                     onSettingsSave = viewModel::applySettings,
+                    onStationSettingsDismiss = viewModel::closeStationSettings,
+                    onStationSettingsSave = viewModel::saveStationSettings,
                     onOpenStationList = viewModel::openStationList,
                     onTabSelected = viewModel::selectTab,
                     onExit = { finish() }
@@ -50,8 +52,11 @@ fun MainScaffold(
     viewModel: WeatherStationViewModel,
     onStationSelected: (WeatherStation) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenStationSettings: () -> Unit,
     onSettingsDismiss: () -> Unit,
     onSettingsSave: (ThemeMode, Int) -> Unit,
+    onStationSettingsDismiss: () -> Unit,
+    onStationSettingsSave: (String, String, String, String, Boolean, List<StationSetting>) -> Unit,
     onOpenStationList: () -> Unit,
     onTabSelected: (WeatherTab) -> Unit,
     onExit: () -> Unit
@@ -74,94 +79,134 @@ fun MainScaffold(
         AboutDialog(onDismiss = { isAboutOpen = false })
     }
 
-    ModalNavigationDrawer(
-        drawerState = drawerState,
-        drawerContent = {
-            ModalDrawerSheet {
-                TextButton(onClick = { scope.launch { drawerState.close() }; onOpenSettings() }) {
-                    Text("Settings")
-                }
-                TextButton(onClick = { scope.launch { drawerState.close() }; isAboutOpen = true }) {
-                    Text("About")
-                }
-                TextButton(onClick = { scope.launch { drawerState.close() }; onExit() }) {
-                    Text("Exit")
+    if (uiState.isStationSettingsOpen && uiState.selectedStation != null) {
+        StationSettingsDialog(
+            station = uiState.selectedStation,
+            isSaving = uiState.stationSettingsSaving,
+            error = uiState.stationSettingsError,
+            onDismiss = onStationSettingsDismiss,
+            onSave = onStationSettingsSave
+        )
+    }
+
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+        ModalNavigationDrawer(
+            drawerState = drawerState,
+            gesturesEnabled = false,
+            drawerContent = {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    ModalDrawerSheet {
+                        TextButton(onClick = { scope.launch { drawerState.close() }; onOpenSettings() }) {
+                            Text("Settings")
+                        }
+                        TextButton(
+                            enabled = !uiState.isStationListOpen && uiState.selectedStation != null,
+                            onClick = { scope.launch { drawerState.close() }; onOpenStationSettings() }
+                        ) {
+                            Text("Station Settings")
+                        }
+                        TextButton(onClick = { scope.launch { drawerState.close() }; isAboutOpen = true }) {
+                            Text("About")
+                        }
+                        TextButton(onClick = { scope.launch { drawerState.close() }; onExit() }) {
+                            Text("Exit")
+                        }
+                    }
                 }
             }
-        }
-    ) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        val titleText = if (uiState.selectedStation == null || uiState.isStationListOpen) {
-                            "Search"
+        ) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Scaffold(
+                    topBar = {
+                        TopAppBar(
+                            title = {
+                                val titleText = if (uiState.selectedStation == null || uiState.isStationListOpen) {
+                                    "Search"
+                                } else {
+                                    uiState.selectedStation.name
+                                }
+                                Text(titleText)
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = onOpenStationList) {
+                                    Icon(Icons.Filled.Search, contentDescription = "Select Station")
+                                }
+                            },
+                            actions = {
+                                IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                                    Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                                }
+                            }
+                        )
+                    },
+                    content = { padding ->
+                        if (uiState.selectedStation == null || uiState.isStationListOpen) {
+                            StationSelectionScreen(
+                                stations = stationListUiState.stations,
+                                onStationSelected = onStationSelected,
+                                stationListUiState = stationListUiState,
+                                onSearch = viewModel::searchStations,
+                                onNextPage = viewModel::nextPage,
+                                onPrevPage = viewModel::prevPage,
+                                modifier = Modifier.padding(padding)
+                            )
                         } else {
-                            uiState.selectedStation.name
-                        }
-                        Text(titleText)
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onOpenStationList) {
-                            Icon(Icons.Filled.Search, contentDescription = "Select Station")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                            val visibleTabs = buildList {
+                                add(WeatherTab.CURRENT)
+                                add(WeatherTab.HISTORY)
+                                if (uiState.selectedStation.hasPower) {
+                                    add(WeatherTab.POWER_USAGE)
+                                }
+                            }
+                            val selectedTabIndex = visibleTabs.indexOf(uiState.selectedTab).coerceAtLeast(0)
+
+                            Column(modifier = Modifier.padding(padding)) {
+                                TabRow(selectedTabIndex = selectedTabIndex) {
+                                    visibleTabs.forEach { tab ->
+                                        Tab(
+                                            selected = uiState.selectedTab == tab,
+                                            onClick = { onTabSelected(tab) },
+                                            text = {
+                                                Text(
+                                                    when (tab) {
+                                                        WeatherTab.CURRENT -> "Current"
+                                                        WeatherTab.HISTORY -> "History"
+                                                        WeatherTab.POWER_USAGE -> "Power Usage"
+                                                    }
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                                when (uiState.selectedTab) {
+                                    WeatherTab.CURRENT -> CurrentWeatherScreen(
+                                        station = uiState.selectedStation,
+                                        weather = uiState.currentWeather,
+                                        isLoading = uiState.currentWeatherLoading,
+                                        error = uiState.currentWeatherError,
+                                        onRefresh = viewModel::refreshCurrentWeather
+                                    )
+                                    WeatherTab.HISTORY -> HistoryScreen(
+                                        report = uiState.historyReport,
+                                        isLoading = uiState.historyLoading,
+                                        error = uiState.historyError,
+                                        dateRangeLabel = uiState.historyDateRangeLabel,
+                                        period = uiState.historyPeriod,
+                                        nextEnabled = uiState.historyNextEnabled,
+                                        onPrev = viewModel::historyPrev,
+                                        onNext = viewModel::historyNext,
+                                        onPeriodChange = viewModel::setHistoryPeriod,
+                                        onRefresh = viewModel::refreshHistory
+                                    )
+                                    WeatherTab.POWER_USAGE -> PowerUsageScreen(
+                                        station = uiState.selectedStation
+                                    )
+                                }
+                            }
                         }
                     }
                 )
-            },
-            content = { padding ->
-                if (uiState.selectedStation == null || uiState.isStationListOpen) {
-                    StationSelectionScreen(
-                        stations = stationListUiState.stations,
-                        onStationSelected = onStationSelected,
-                        stationListUiState = stationListUiState,
-                        onSearch = viewModel::searchStations,
-                        onNextPage = viewModel::nextPage,
-                        onPrevPage = viewModel::prevPage,
-                        modifier = Modifier.padding(padding)
-                    )
-                } else {
-                    Column(modifier = Modifier.padding(padding)) {
-                        TabRow(selectedTabIndex = uiState.selectedTab.ordinal) {
-                            Tab(
-                                selected = uiState.selectedTab == WeatherTab.CURRENT,
-                                onClick = { onTabSelected(WeatherTab.CURRENT) },
-                                text = { Text("Current") }
-                            )
-                            Tab(
-                                selected = uiState.selectedTab == WeatherTab.HISTORY,
-                                onClick = { onTabSelected(WeatherTab.HISTORY) },
-                                text = { Text("History") }
-                            )
-                        }
-                        when (uiState.selectedTab) {
-                            WeatherTab.CURRENT -> CurrentWeatherScreen(
-                                station = uiState.selectedStation,
-                                weather = uiState.currentWeather,
-                                isLoading = uiState.currentWeatherLoading,
-                                error = uiState.currentWeatherError,
-                                onRefresh = viewModel::refreshCurrentWeather
-                            )
-                            WeatherTab.HISTORY -> HistoryScreen(
-                                report = uiState.historyReport,
-                                isLoading = uiState.historyLoading,
-                                error = uiState.historyError,
-                                dateRangeLabel = uiState.historyDateRangeLabel,
-                                period = uiState.historyPeriod,
-                                nextEnabled = uiState.historyNextEnabled,
-                                onPrev = viewModel::historyPrev,
-                                onNext = viewModel::historyNext,
-                                onPeriodChange = viewModel::setHistoryPeriod,
-                                onRefresh = viewModel::refreshHistory
-                            )
-                        }
-                    }
-                }
             }
-        )
+        }
     }
 }
