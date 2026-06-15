@@ -1,16 +1,49 @@
 package com.storrs.homeweatherhub
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material.pullrefresh.PullRefreshIndicator
+import androidx.compose.material.pullrefresh.pullRefresh
+import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+import kotlin.math.max
 
+private const val MissingValue = "--"
+
+private data class PowerRow(
+    val label: String,
+    val value: String,
+    val isAlertValue: Boolean = false
+)
+
+private data class PowerSection(
+    val title: String,
+    val rows: List<PowerRow>
+)
+
+@OptIn(ExperimentalMaterialApi::class)
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun PowerUsageScreen(
     station: WeatherStation,
@@ -20,112 +53,177 @@ fun PowerUsageScreen(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val settingsMap = station.settings.associate { it.key to it.value }
+    val valueColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val headerColor = MaterialTheme.colorScheme.tertiary
+    val isRefreshing = froniusState.isLoading || goodWeState.isLoading || zappiState.isLoading
+    val hasData = froniusState.data != null || goodWeState.data != null || zappiState.data != null
+    val refreshState = rememberPullRefreshState(
+        refreshing = isRefreshing && hasData,
+        onRefresh = onRefresh
+    )
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text("Power Usage", style = MaterialTheme.typography.headlineSmall)
-        Text("Station: ${station.name}", style = MaterialTheme.typography.titleMedium)
+    val froniusPv = froniusState.data?.let { it.pv1Power + it.pv2Power }
+    val goodWeBattery = goodWeState.data?.batteryData
+    val goodWePv = goodWeBattery?.pvTotalPower
+    val zappi = zappiState.data
 
-        val isRefreshing = froniusState.isLoading || goodWeState.isLoading || zappiState.isLoading
-        Button(onClick = onRefresh, enabled = !isRefreshing) {
-            Text(if (isRefreshing) "Refreshing..." else "Refresh")
+    val batterySoc = goodWeBattery?.stateOfCharge?.let { "$it%" } ?: MissingValue
+    val batteryPowerLabel = when (goodWeBattery?.state) {
+        "Charging" -> "Charging"
+        "Discharging" -> "Discharging"
+        "Idle" -> "Idle"
+        else -> "State"
+    }
+    val batteryPowerValue = goodWeBattery?.power?.let { formatWatts(abs(it)) } ?: MissingValue
+    val batteryIsDischarging = goodWeBattery?.state == "Discharging"
+
+    val solarGenerated = (froniusPv ?: 0.0) + (goodWePv ?: 0.0)
+    val gridFromZappi = zappi?.gridPower ?: 0.0
+    val gridImport = max(gridFromZappi, 0.0)
+    val gridExport = max(-gridFromZappi, 0.0)
+    val batteryDischarge = max(goodWeBattery?.power ?: 0.0, 0.0)
+    val batteryCharge = max(-(goodWeBattery?.power ?: 0.0), 0.0)
+    val carCharging = max(zappi?.chargingPower ?: 0.0, 0.0)
+    val estimatedHousePower =
+        solarGenerated + gridImport + batteryDischarge - gridExport - carCharging - batteryCharge
+    val zappiGridPower = zappi?.gridPower
+    val zappiGridLabel = when {
+        zappiGridPower == null -> "Grid"
+        zappiGridPower < 0 -> "Exporting"
+        else -> "Importing"
+    }
+
+    val sections = listOf(
+        PowerSection(
+            title = "SOLAR GENERATION",
+            rows = listOf(
+                PowerRow("Fronius", froniusPv?.let { formatWatts(it) }.orMissing()),
+                PowerRow("GoodWe", goodWePv?.let { formatWatts(it) }.orMissing())
+            )
+        ),
+        PowerSection(
+            title = "BATTERY",
+            rows = listOf(
+                PowerRow("SOC", batterySoc),
+                PowerRow(
+                    label = batteryPowerLabel,
+                    value = batteryPowerValue,
+                    isAlertValue = batteryIsDischarging
+                )
+            )
+        ),
+        PowerSection(
+            title = "ZAPPI",
+            rows = listOf(
+                PowerRow("ChargingPower", zappi?.chargingPower?.let { formatWatts(it) }.orMissing()),
+                PowerRow("ChargeAdded", zappi?.chargeAdded?.let { "${formatOneDecimal(it)} kWh" }.orMissing()),
+                PowerRow("Status", zappi?.status.orMissing()),
+                PowerRow("PlugStatus", zappi?.plugStatus.orMissing()),
+                PowerRow("Mode", zappi?.mode.orMissing()),
+                PowerRow("MinimumGreenLevel", zappi?.minimumGreenLevel?.let { "$it%" }.orMissing())
+            )
+        ),
+        PowerSection(
+            title = "HOUSE",
+            rows = listOf(
+                PowerRow("Estimated Usage", if (hasData) formatWatts(estimatedHousePower) else MissingValue)
+            )
+        ),
+        PowerSection(
+            title = "GRID",
+            rows = listOf(
+                PowerRow(
+                    label = zappiGridLabel,
+                    value = zappiGridPower?.let { formatWatts(abs(it)) }.orMissing(),
+                    isAlertValue = (zappiGridPower ?: 0.0) > 0
+                )
+            )
+        )
+    )
+
+    Box(modifier = modifier.fillMaxSize().pullRefresh(refreshState, enabled = hasData)) {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            when {
+                isRefreshing && !hasData -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+                !hasData && (froniusState.error != null || goodWeState.error != null || zappiState.error != null) -> {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOfNotNull(froniusState.error, goodWeState.error, zappiState.error).forEach { errorText ->
+                            Text(text = errorText, color = MaterialTheme.colorScheme.error)
+                        }
+                        Text("Pull down to retry when devices are reachable.")
+                    }
+                }
+                else -> {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        sections.forEach { section ->
+                            item {
+                                PowerSectionCard(section = section, valueColor = valueColor, headerColor = headerColor)
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+                        }
+                    }
+                }
+            }
         }
-
-        Text("Fronius IP: ${settingsMap["FroniusIP"].orEmpty()}")
-        Text("GoodWe IP: ${settingsMap["GoodWeIP"].orEmpty()}")
-        Text("Zappi Serial: ${settingsMap["ZappiSerial"].orEmpty()}")
-
-        Text("Fronius", style = MaterialTheme.typography.titleMedium)
-        when {
-            froniusState.isLoading -> {
-                Text("Loading Fronius data...")
-            }
-            froniusState.error != null -> {
-                Text(froniusState.error, color = MaterialTheme.colorScheme.error)
-            }
-            froniusState.data != null -> {
-                val data = froniusState.data
-                val totalPvPower = data.pv1Power + data.pv2Power
-                Text("Total PV Output: ${totalPvPower} W")
-                if (!froniusState.infoMessage.isNullOrBlank()) {
-                    Text(froniusState.infoMessage, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            else -> {
-                Text("No Fronius data loaded yet.")
-            }
-        }
-
-        Text("GoodWe", style = MaterialTheme.typography.titleMedium)
-        when {
-            goodWeState.isLoading -> {
-                Text("Loading GoodWe data...")
-            }
-            goodWeState.error != null -> {
-                Text(goodWeState.error, color = MaterialTheme.colorScheme.error)
-            }
-            goodWeState.data != null -> {
-                val battery = goodWeState.data.batteryData
-                val inverter = goodWeState.data.inverterInfo
-                if (battery != null) {
-                    Text("Total PV Output: ${battery.pvTotalPower} W")
-                    Text("Battery Power: ${battery.power} W")
-                    Text("Battery SOC: ${battery.stateOfCharge}%")
-                    Text("Battery State: ${battery.state}")
-                } else {
-                    Text("No battery payload parsed.")
-                }
-                if (!inverter?.modelLine.isNullOrBlank()) {
-                    Text("Model: ${inverter.modelLine}")
-                }
-                if (!goodWeState.infoMessage.isNullOrBlank()) {
-                    Text(goodWeState.infoMessage, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            else -> {
-                Text("No GoodWe data loaded yet.")
-            }
-        }
-
-        Text("Zappi", style = MaterialTheme.typography.titleMedium)
-        when {
-            zappiState.isLoading -> {
-                Text("Loading Zappi data...")
-            }
-            zappiState.error != null -> {
-                Text(zappiState.error, color = MaterialTheme.colorScheme.error)
-                if (!zappiState.infoMessage.isNullOrBlank()) {
-                    Text(zappiState.infoMessage, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            zappiState.data != null -> {
-                val data = zappiState.data
-                val gridDirection = when {
-                    data.gridPower < 0 -> "Exporting"
-                    data.gridPower > 0 -> "Importing"
-                    else -> "Idle"
-                }
-                Text("EV Charging: ${if (data.isCharging) "Yes" else "No"}")
-                Text("Power to Car: ${data.chargingPower} W")
-                Text("Grid: ${"%.0f".format(data.gridPower)} W (${"%.2f".format(data.gridPower / 1000.0)} kW) - $gridDirection")
-                Text("Status: ${data.status}")
-                if (!zappiState.infoMessage.isNullOrBlank()) {
-                    Text(zappiState.infoMessage, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            else -> {
-                Text("No Zappi data loaded yet.")
-            }
-        }
-
-        Text(
-            text = "Totals will appear once all three APIs are implemented and successful.",
-            style = MaterialTheme.typography.bodySmall
+        PullRefreshIndicator(
+            refreshing = isRefreshing && hasData,
+            state = refreshState,
+            modifier = Modifier.align(Alignment.TopCenter)
         )
     }
 }
+
+@Composable
+private fun PowerSectionCard(section: PowerSection, valueColor: Color, headerColor: Color) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Text(
+                text = section.title,
+                style = MaterialTheme.typography.labelLarge.copy(
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.8.sp
+                ),
+                color = headerColor,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            section.rows.forEach { row ->
+                PowerKeyValueRow(
+                    label = row.label,
+                    value = row.value,
+                    valueColor = valueColor,
+                    isAlertValue = row.isAlertValue
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PowerKeyValueRow(label: String, value: String, valueColor: Color, isAlertValue: Boolean = false) {
+    val displayValueColor = if (isAlertValue) MaterialTheme.colorScheme.error else valueColor
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = valueColor)
+        Text(text = value, style = MaterialTheme.typography.bodyMedium, color = displayValueColor)
+    }
+}
+
+private fun formatWatts(value: Double): String = "${formatOneDecimal(value)} W"
+
+private fun formatOneDecimal(value: Double): String = "%.1f".format(value)
+
+private fun String?.orMissing(): String = if (this.isNullOrBlank()) MissingValue else this
+
+private fun Any?.orMissing(): String = this?.toString() ?: MissingValue
