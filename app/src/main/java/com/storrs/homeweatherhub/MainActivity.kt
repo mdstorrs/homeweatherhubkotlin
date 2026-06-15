@@ -187,7 +187,11 @@ fun MainScaffold(
                                             onRefresh = viewModel::refreshHistory
                                         )
                                         WeatherTab.POWER_USAGE -> PowerUsageScreen(
-                                            station = uiState.selectedStation
+                                            station = uiState.selectedStation,
+                                            froniusState = uiState.froniusPower,
+                                            goodWeState = uiState.goodWePower,
+                                            zappiState = uiState.zappiPower,
+                                            onRefresh = viewModel::refreshPowerUsage
                                         )
                                     }
                                 }

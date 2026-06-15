@@ -73,7 +73,10 @@ data class WeatherStationUiState(
     val isSettingsOpen: Boolean = false,
     val isStationSettingsOpen: Boolean = false,
     val stationSettingsSaving: Boolean = false,
-    val stationSettingsError: String? = null
+    val stationSettingsError: String? = null,
+    val froniusPower: PowerDeviceUiState<FroniusInverterData> = PowerDeviceUiState(),
+    val goodWePower: PowerDeviceUiState<GoodWeData> = PowerDeviceUiState(),
+    val zappiPower: PowerDeviceUiState<ZappiData> = PowerDeviceUiState()
 )
 
 data class StationListUiState(
@@ -110,6 +113,107 @@ data class HistoryReport(
     val type: Int,
     val measurement: Int,
     val measurementSymbol: String
+)
+
+data class FroniusInverterData(
+    val currentPower: Double = 0.0,
+    val dayEnergy: Double = 0.0,
+    val totalEnergy: Double = 0.0,
+    val acVoltage: Double = 0.0,
+    val acCurrent: Double = 0.0,
+    val acFrequency: Double = 0.0,
+    val dcVoltage: Double = 0.0,
+    val dcCurrent: Double = 0.0,
+    val deviceStatus: String = "",
+    val deviceStatusCode: Int = 0,
+    val errorCode: String = "",
+    val model: String = "",
+    val serialNumber: String = "",
+    val pv1Power: Double = 0.0,
+    val pv2Power: Double = 0.0,
+    val pv1Voltage: Double = 0.0,
+    val pv2Voltage: Double = 0.0,
+    val pv1Current: Double = 0.0,
+    val pv2Current: Double = 0.0,
+    val gridVoltage: Double = 0.0,
+    val gridFrequency: Double = 0.0,
+    val ambientTemperature: Double = 0.0,
+    val uptime: Double = 0.0
+)
+
+data class GoodWeInverterInfo(
+    val rawText: String = "",
+    val modelLine: String = "",
+    val serialLine: String = "",
+    val firmwareLine: String = "",
+    val asciiData: String = ""
+)
+
+data class GoodWeBatteryData(
+    val stateOfCharge: Int = 0,
+    val voltage: Double = 0.0,
+    val current: Double = 0.0,
+    val power: Double = 0.0,
+    val state: String = "",
+    val temperature: Double = 0.0,
+    val healthIndex: Int = 0,
+    val chargeLimit: Int = 0,
+    val dischargeLimit: Int = 0,
+    val pv1Voltage: Double = 0.0,
+    val pv2Voltage: Double = 0.0,
+    val pv1Current: Double = 0.0,
+    val pv2Current: Double = 0.0,
+    val pvTotalPower: Double = 0.0,
+    val gridPower: Int = 0,
+    val inverterVoltage: Double = 0.0,
+    val backupVoltage: Double = 0.0,
+    val asciiData: String = ""
+)
+
+data class GoodWeData(
+    val inverterInfo: GoodWeInverterInfo? = null,
+    val batteryData: GoodWeBatteryData? = null
+)
+
+data class ZappiData(
+    val serialNumber: String = "",
+    val chargingPower: Double = 0.0,
+    val gridPower: Double = 0.0,
+    val generatedPower: Double = 0.0,
+    val chargeAdded: Double = 0.0,
+    val supplyVoltage: Double = 0.0,
+    val supplyFrequency: Double = 0.0,
+    val statusCode: Int = 0,
+    val status: String = "",
+    val plugStatusCode: String = "",
+    val plugStatus: String = "",
+    val modeCode: Int = 0,
+    val mode: String = "",
+    val minimumGreenLevel: Int = 0,
+    val firmwareVersion: String = "",
+    val phases: Int = 0,
+    val ct1Power: Double = 0.0,
+    val ct2Power: Double = 0.0,
+    val ct3Power: Double = 0.0,
+    val ct4Power: Double = 0.0,
+    val ct5Power: Double = 0.0,
+    val ct6Power: Double = 0.0,
+    val ct1Label: String = "",
+    val ct2Label: String = "",
+    val ct3Label: String = "",
+    val ct4Label: String = "",
+    val ct5Label: String = "",
+    val ct6Label: String = "",
+    val date: String = "",
+    val time: String = "",
+    val isCharging: Boolean = false
+)
+
+data class PowerDeviceUiState<T>(
+    val isLoading: Boolean = false,
+    val data: T? = null,
+    val infoMessage: String? = null,
+    val error: String? = null
 )
 
 enum class HistoryPeriod(val apiValue: Int, val label: String, val step: Period) {
@@ -171,7 +275,10 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
         _uiState.value = _uiState.value.copy(
             selectedStation = station,
             isStationListOpen = false,
-            selectedTab = sanitizeTabSelection(_uiState.value.selectedTab, station)
+            selectedTab = sanitizeTabSelection(_uiState.value.selectedTab, station),
+            froniusPower = PowerDeviceUiState(),
+            goodWePower = PowerDeviceUiState(),
+            zappiPower = PowerDeviceUiState()
         )
         viewModelScope.launch {
             val context = getApplication<Application>().applicationContext
@@ -251,12 +358,29 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
                     loadHistory(station, _uiState.value.historyPeriod, _uiState.value.historyStartDate)
                 }
             }
-            WeatherTab.POWER_USAGE -> Unit
+            WeatherTab.POWER_USAGE -> {
+                if (station != null && !_uiState.value.froniusPower.isLoading && _uiState.value.froniusPower.data == null) {
+                    loadFroniusPowerUsage(station)
+                }
+                if (station != null && !_uiState.value.goodWePower.isLoading && _uiState.value.goodWePower.data == null) {
+                    loadGoodWePowerUsage(station)
+                }
+                if (station != null && !_uiState.value.zappiPower.isLoading && _uiState.value.zappiPower.data == null) {
+                    loadZappiPowerUsage(station)
+                }
+            }
         }
 
         if (tab == WeatherTab.POWER_USAGE) {
             refreshSelectedStationDetails(showErrorInSettingsDialog = false)
         }
+    }
+
+    fun refreshPowerUsage() {
+        val station = _uiState.value.selectedStation ?: return
+        loadFroniusPowerUsage(station)
+        loadGoodWePowerUsage(station)
+        loadZappiPowerUsage(station)
     }
 
     fun saveStationSettings(
@@ -310,7 +434,10 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
                 selectedTab = selectedTab,
                 isStationSettingsOpen = false,
                 stationSettingsSaving = false,
-                stationSettingsError = null
+                stationSettingsError = null,
+                froniusPower = PowerDeviceUiState(),
+                goodWePower = PowerDeviceUiState(),
+                zappiPower = PowerDeviceUiState()
             )
 
             _stationListUiState.value = _stationListUiState.value.copy(
@@ -570,6 +697,171 @@ class WeatherStationViewModel(application: Application) : AndroidViewModel(appli
             return WeatherTab.CURRENT
         }
         return selectedTab
+    }
+
+    private fun loadFroniusPowerUsage(station: WeatherStation) {
+        if (!station.hasPower) {
+            _uiState.value = _uiState.value.copy(
+                froniusPower = PowerDeviceUiState(),
+                goodWePower = PowerDeviceUiState(),
+                zappiPower = PowerDeviceUiState()
+            )
+            return
+        }
+
+        val froniusIp = station.settings
+            .firstOrNull { it.key.equals("FroniusIP", ignoreCase = true) }
+            ?.value
+            ?.trim()
+            .orEmpty()
+
+        if (froniusIp.isBlank()) {
+            _uiState.value = _uiState.value.copy(
+                froniusPower = PowerDeviceUiState(
+                    isLoading = false,
+                    data = null,
+                    infoMessage = null,
+                    error = "Fronius IP is not configured in Station Settings"
+                )
+            )
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(
+            froniusPower = _uiState.value.froniusPower.copy(isLoading = true, error = null, infoMessage = null)
+        )
+
+        viewModelScope.launch {
+            val result = WeatherStationRepository.fetchFroniusInverterData(froniusIp)
+            _uiState.value = if (result.success && result.data != null) {
+                _uiState.value.copy(
+                    froniusPower = PowerDeviceUiState(
+                        isLoading = false,
+                        data = result.data,
+                        infoMessage = result.message,
+                        error = null
+                    )
+                )
+            } else {
+                _uiState.value.copy(
+                    froniusPower = PowerDeviceUiState(
+                        isLoading = false,
+                        data = null,
+                        infoMessage = null,
+                        error = result.error ?: result.message ?: "Unable to load Fronius data"
+                    )
+                )
+            }
+        }
+    }
+
+    private fun loadGoodWePowerUsage(station: WeatherStation) {
+        if (!station.hasPower) {
+            _uiState.value = _uiState.value.copy(goodWePower = PowerDeviceUiState())
+            return
+        }
+
+        val goodWeIp = station.settings
+            .firstOrNull { it.key.equals("GoodWeIP", ignoreCase = true) }
+            ?.value
+            ?.trim()
+            .orEmpty()
+
+        if (goodWeIp.isBlank()) {
+            _uiState.value = _uiState.value.copy(
+                goodWePower = PowerDeviceUiState(
+                    isLoading = false,
+                    data = null,
+                    infoMessage = null,
+                    error = "GoodWe IP is not configured in Station Settings"
+                )
+            )
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(
+            goodWePower = _uiState.value.goodWePower.copy(isLoading = true, error = null, infoMessage = null)
+        )
+
+        viewModelScope.launch {
+            val result = WeatherStationRepository.fetchGoodWeData(goodWeIp)
+            _uiState.value = if (result.success && result.data != null) {
+                _uiState.value.copy(
+                    goodWePower = PowerDeviceUiState(
+                        isLoading = false,
+                        data = result.data,
+                        infoMessage = result.message,
+                        error = null
+                    )
+                )
+            } else {
+                _uiState.value.copy(
+                    goodWePower = PowerDeviceUiState(
+                        isLoading = false,
+                        data = null,
+                        infoMessage = null,
+                        error = result.error ?: result.message ?: "Unable to load GoodWe data"
+                    )
+                )
+            }
+        }
+    }
+
+    private fun loadZappiPowerUsage(station: WeatherStation) {
+        if (!station.hasPower) {
+            _uiState.value = _uiState.value.copy(zappiPower = PowerDeviceUiState())
+            return
+        }
+
+        val zappiSerial = station.settings
+            .firstOrNull { it.key.equals("ZappiSerial", ignoreCase = true) }
+            ?.value
+            ?.trim()
+            .orEmpty()
+        val zappiApiKey = station.settings
+            .firstOrNull { it.key.equals("ZappiAPIKey", ignoreCase = true) }
+            ?.value
+            ?.trim()
+            .orEmpty()
+
+        if (zappiSerial.isBlank() || zappiApiKey.isBlank()) {
+            _uiState.value = _uiState.value.copy(
+                zappiPower = PowerDeviceUiState(
+                    isLoading = false,
+                    data = null,
+                    infoMessage = null,
+                    error = "Zappi Serial/API key are not configured in Station Settings"
+                )
+            )
+            return
+        }
+
+        _uiState.value = _uiState.value.copy(
+            zappiPower = _uiState.value.zappiPower.copy(isLoading = true, error = null, infoMessage = null)
+        )
+
+        viewModelScope.launch {
+            val result = WeatherStationRepository.fetchZappiData(zappiSerial, zappiApiKey)
+            _uiState.value = if (result.success && result.data != null) {
+                _uiState.value.copy(
+                    zappiPower = PowerDeviceUiState(
+                        isLoading = false,
+                        data = result.data,
+                        infoMessage = result.message,
+                        error = null
+                    )
+                )
+            } else {
+                _uiState.value.copy(
+                    zappiPower = PowerDeviceUiState(
+                        isLoading = false,
+                        data = null,
+                        infoMessage = result.message,
+                        error = result.error ?: result.message ?: "Unable to load Zappi data"
+                    )
+                )
+            }
+        }
     }
 
     private fun refreshSelectedStationDetails(showErrorInSettingsDialog: Boolean) {
