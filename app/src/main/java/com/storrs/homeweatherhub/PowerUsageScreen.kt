@@ -30,11 +30,13 @@ import kotlin.math.abs
 import kotlin.math.max
 
 private const val MissingValue = "--"
+private val ChargedValueColor = Color(0xFF2E7D32)
 
 private data class PowerRow(
     val label: String,
     val value: String,
-    val isAlertValue: Boolean = false
+    val isAlertValue: Boolean = false,
+    val valueColorOverride: Color? = null
 )
 
 private data class PowerSection(
@@ -55,8 +57,18 @@ fun PowerUsageScreen(
 ) {
     val valueColor = MaterialTheme.colorScheme.onSurfaceVariant
     val headerColor = MaterialTheme.colorScheme.tertiary
-    val isRefreshing = froniusState.isLoading || goodWeState.isLoading || zappiState.isLoading
-    val hasData = froniusState.data != null || goodWeState.data != null || zappiState.data != null
+    val froniusConfigured = station.settingValue("FroniusIP").isNotBlank()
+    val goodWeConfigured = station.settingValue("GoodWeIP").isNotBlank()
+    val zappiConfigured = station.settingValue("ZappiAPIKey").isNotBlank() && station.settingValue("ZappiSerial").isNotBlank()
+    val hasConfiguredInterface = froniusConfigured || goodWeConfigured || zappiConfigured
+    val isRefreshing =
+        (froniusConfigured && froniusState.isLoading) ||
+            (goodWeConfigured && goodWeState.isLoading) ||
+            (zappiConfigured && zappiState.isLoading)
+    val hasData =
+        (froniusConfigured && froniusState.data != null) ||
+            (goodWeConfigured && goodWeState.data != null) ||
+            (zappiConfigured && zappiState.data != null)
     val refreshState = rememberPullRefreshState(
         refreshing = isRefreshing && hasData,
         onRefresh = onRefresh
@@ -67,7 +79,13 @@ fun PowerUsageScreen(
     val goodWePv = goodWeBattery?.pvTotalPower
     val zappi = zappiState.data
 
-    val batterySoc = goodWeBattery?.stateOfCharge?.let { "$it%" } ?: MissingValue
+    val batterySocPercent = goodWeBattery?.stateOfCharge
+    val isBatteryFullyCharged = batterySocPercent == 100
+    val batterySoc = when {
+        batterySocPercent == null -> MissingValue
+        isBatteryFullyCharged -> "Charged"
+        else -> "$batterySocPercent%"
+    }
     val batteryPowerLabel = when (goodWeBattery?.state) {
         "Charging" -> "Charging"
         "Discharging" -> "Discharging"
@@ -86,6 +104,7 @@ fun PowerUsageScreen(
     val carCharging = max(zappi?.chargingPower ?: 0.0, 0.0)
     val estimatedHousePower =
         solarGenerated + gridImport + batteryDischarge - gridExport - carCharging - batteryCharge
+    val canCalculateHomeValue = froniusConfigured && goodWeConfigured && zappiConfigured && froniusState.data != null && goodWeBattery != null && zappi != null
     val zappiGridPower = zappi?.gridPower
     val zappiGridLabel = when {
         zappiGridPower == null -> "Grid"
@@ -93,55 +112,86 @@ fun PowerUsageScreen(
         else -> "Importing"
     }
 
-    val sections = listOf(
-        PowerSection(
-            title = "SOLAR GENERATION",
-            rows = listOf(
-                PowerRow("Fronius", froniusPv?.let { formatWatts(it) }.orMissing()),
-                PowerRow("GoodWe", goodWePv?.let { formatWatts(it) }.orMissing())
-            )
-        ),
-        PowerSection(
-            title = "BATTERY",
-            rows = listOf(
-                PowerRow("SOC", batterySoc),
-                PowerRow(
-                    label = batteryPowerLabel,
-                    value = batteryPowerValue,
-                    isAlertValue = batteryIsDischarging
+    val sections = buildList {
+        val solarRows = buildList {
+            if (froniusConfigured) {
+                add(PowerRow("Fronius", froniusPv?.let { formatWatts(it) }.orMissing()))
+            }
+            if (goodWeConfigured) {
+                add(PowerRow("GoodWe", goodWePv?.let { formatWatts(it) }.orMissing()))
+            }
+        }
+        if (solarRows.isNotEmpty()) {
+            add(PowerSection(title = "SOLAR GENERATION", rows = solarRows))
+        }
+
+        if (goodWeConfigured) {
+            add(
+                PowerSection(
+                    title = "BATTERY",
+                    rows = listOf(
+                        PowerRow(
+                            label = "State of Charge",
+                            value = batterySoc,
+                            valueColorOverride = if (isBatteryFullyCharged) ChargedValueColor else null
+                        ),
+                        PowerRow(
+                            label = batteryPowerLabel,
+                            value = batteryPowerValue,
+                            isAlertValue = batteryIsDischarging
+                        )
+                    )
                 )
             )
-        ),
-        PowerSection(
-            title = "ZAPPI",
-            rows = listOf(
-                PowerRow("ChargingPower", zappi?.chargingPower?.let { formatWatts(it) }.orMissing()),
-                PowerRow("ChargeAdded", zappi?.chargeAdded?.let { "${formatOneDecimal(it)} kWh" }.orMissing()),
-                PowerRow("Status", zappi?.status.orMissing()),
-                PowerRow("PlugStatus", zappi?.plugStatus.orMissing()),
-                PowerRow("Mode", zappi?.mode.orMissing()),
-                PowerRow("MinimumGreenLevel", zappi?.minimumGreenLevel?.let { "$it%" }.orMissing())
-            )
-        ),
-        PowerSection(
-            title = "HOUSE",
-            rows = listOf(
-                PowerRow("Estimated Usage", if (hasData) formatWatts(estimatedHousePower) else MissingValue)
-            )
-        ),
-        PowerSection(
-            title = "GRID",
-            rows = listOf(
-                PowerRow(
-                    label = zappiGridLabel,
-                    value = zappiGridPower?.let { formatWatts(abs(it)) }.orMissing(),
-                    isAlertValue = (zappiGridPower ?: 0.0) > 0
+        }
+
+        if (zappiConfigured) {
+            add(
+                PowerSection(
+                    title = "ZAPPI",
+                    rows = listOf(
+                        PowerRow("Charging Power", zappi?.chargingPower?.let { formatWatts(it) }.orMissing()),
+                        PowerRow("Charge Added", zappi?.chargeAdded?.let { "${formatOneDecimal(it)} kWh" }.orMissing()),
+                        PowerRow("Charging Status", zappi?.status.orMissing()),
+                        PowerRow("Plug Status", zappi?.plugStatus.orMissing()),
+                        PowerRow("Set Mode", zappi?.mode.orMissing()),
+                        PowerRow("Minimum Green Level", zappi?.minimumGreenLevel?.let { "$it%" }.orMissing())
+                    )
                 )
             )
-        )
+        }
+
+        if (canCalculateHomeValue) {
+            add(
+                PowerSection(
+                    title = "HOUSE",
+                    rows = listOf(PowerRow("Estimated Usage", formatWatts(estimatedHousePower)))
+                )
+            )
+        }
+
+        if (zappiConfigured && zappi != null) {
+            add(
+                PowerSection(
+                    title = "GRID",
+                    rows = listOf(
+                        PowerRow(
+                            label = zappiGridLabel,
+                            value = zappiGridPower?.let { formatWatts(abs(it)) }.orMissing(),
+                            isAlertValue = (zappiGridPower ?: 0.0) > 0
+                        )
+                    )
+                )
+            )
+        }
+    }
+    val visibleErrors = listOfNotNull(
+        froniusState.error.takeIf { froniusConfigured },
+        goodWeState.error.takeIf { goodWeConfigured },
+        zappiState.error.takeIf { zappiConfigured }
     )
 
-    Box(modifier = modifier.fillMaxSize().pullRefresh(refreshState, enabled = hasData)) {
+    Box(modifier = modifier.fillMaxSize().pullRefresh(refreshState, enabled = hasConfiguredInterface)) {
         Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
             when {
                 isRefreshing && !hasData -> {
@@ -149,13 +199,16 @@ fun PowerUsageScreen(
                         CircularProgressIndicator()
                     }
                 }
-                !hasData && (froniusState.error != null || goodWeState.error != null || zappiState.error != null) -> {
+                !hasData && visibleErrors.isNotEmpty() -> {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOfNotNull(froniusState.error, goodWeState.error, zappiState.error).forEach { errorText ->
+                        visibleErrors.forEach { errorText ->
                             Text(text = errorText, color = MaterialTheme.colorScheme.error)
                         }
                         Text("Pull down to retry when devices are reachable.")
                     }
+                }
+                sections.isEmpty() -> {
+                    Text("No configured power interfaces for this station.")
                 }
                 else -> {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -199,7 +252,8 @@ private fun PowerSectionCard(section: PowerSection, valueColor: Color, headerCol
                     label = row.label,
                     value = row.value,
                     valueColor = valueColor,
-                    isAlertValue = row.isAlertValue
+                    isAlertValue = row.isAlertValue,
+                    valueColorOverride = row.valueColorOverride
                 )
             }
         }
@@ -207,8 +261,14 @@ private fun PowerSectionCard(section: PowerSection, valueColor: Color, headerCol
 }
 
 @Composable
-private fun PowerKeyValueRow(label: String, value: String, valueColor: Color, isAlertValue: Boolean = false) {
-    val displayValueColor = if (isAlertValue) MaterialTheme.colorScheme.error else valueColor
+private fun PowerKeyValueRow(
+    label: String,
+    value: String,
+    valueColor: Color,
+    isAlertValue: Boolean = false,
+    valueColorOverride: Color? = null
+) {
+    val displayValueColor = valueColorOverride ?: if (isAlertValue) MaterialTheme.colorScheme.error else valueColor
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -223,6 +283,9 @@ private fun PowerKeyValueRow(label: String, value: String, valueColor: Color, is
 private fun formatWatts(value: Double): String = "${formatOneDecimal(value)} W"
 
 private fun formatOneDecimal(value: Double): String = "%.1f".format(value)
+
+private fun WeatherStation.settingValue(key: String): String =
+    settings.firstOrNull { it.key.equals(key, ignoreCase = true) }?.value?.trim().orEmpty()
 
 private fun String?.orMissing(): String = if (this.isNullOrBlank()) MissingValue else this
 
