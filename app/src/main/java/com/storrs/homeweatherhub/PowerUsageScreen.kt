@@ -1,5 +1,6 @@
 package com.storrs.homeweatherhub
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -36,7 +41,8 @@ private data class PowerRow(
     val label: String,
     val value: String,
     val isAlertValue: Boolean = false,
-    val valueColorOverride: Color? = null
+    val valueColorOverride: Color? = null,
+    val onLabelClick: (() -> Unit)? = null
 )
 
 private data class PowerSection(
@@ -55,6 +61,8 @@ fun PowerUsageScreen(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showFroniusDetails by remember(station.id) { mutableStateOf(false) }
+    var showGoodWeDetails by remember(station.id) { mutableStateOf(false) }
     val valueColor = MaterialTheme.colorScheme.onSurfaceVariant
     val headerColor = MaterialTheme.colorScheme.tertiary
     val froniusConfigured = station.settingValue("FroniusIP").isNotBlank()
@@ -115,14 +123,36 @@ fun PowerUsageScreen(
     val sections = buildList {
         val solarRows = buildList {
             if (froniusConfigured) {
-                add(PowerRow("Fronius", froniusPv?.let { formatWatts(it) }.orMissing()))
+                val froniusLabel = if (showFroniusDetails) "Fronius (Hide details)" else "Fronius (Show details)"
+                add(
+                    PowerRow(
+                        label = froniusLabel,
+                        value = froniusPv?.let { formatWatts(it) }.orMissing(),
+                        onLabelClick = { showFroniusDetails = !showFroniusDetails }
+                    )
+                )
             }
             if (goodWeConfigured) {
-                add(PowerRow("GoodWe", goodWePv?.let { formatWatts(it) }.orMissing()))
+                val goodWeLabel = if (showGoodWeDetails) "GoodWe (Hide details)" else "GoodWe (Show details)"
+                add(
+                    PowerRow(
+                        label = goodWeLabel,
+                        value = goodWePv?.let { formatWatts(it) }.orMissing(),
+                        onLabelClick = { showGoodWeDetails = !showGoodWeDetails }
+                    )
+                )
             }
         }
         if (solarRows.isNotEmpty()) {
             add(PowerSection(title = "SOLAR GENERATION", rows = solarRows))
+        }
+
+        if (froniusConfigured && showFroniusDetails) {
+            add(PowerSection(title = "FRONIUS DETAILS", rows = buildFroniusDetailsRows(froniusState.data, froniusState.infoMessage)))
+        }
+
+        if (goodWeConfigured && showGoodWeDetails) {
+            add(PowerSection(title = "GOODWE DETAILS", rows = buildGoodWeDetailsRows(goodWeState.data)))
         }
 
         if (goodWeConfigured) {
@@ -253,7 +283,8 @@ private fun PowerSectionCard(section: PowerSection, valueColor: Color, headerCol
                     value = row.value,
                     valueColor = valueColor,
                     isAlertValue = row.isAlertValue,
-                    valueColorOverride = row.valueColorOverride
+                    valueColorOverride = row.valueColorOverride,
+                    onLabelClick = row.onLabelClick
                 )
             }
         }
@@ -266,16 +297,34 @@ private fun PowerKeyValueRow(
     value: String,
     valueColor: Color,
     isAlertValue: Boolean = false,
-    valueColorOverride: Color? = null
+    valueColorOverride: Color? = null,
+    onLabelClick: (() -> Unit)? = null
 ) {
     val displayValueColor = valueColorOverride ?: if (isAlertValue) MaterialTheme.colorScheme.error else valueColor
+    if (value.isBlank()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = valueColor,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp, bottom = 4.dp)
+        )
+        return
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = valueColor)
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = valueColor,
+            modifier = if (onLabelClick != null) Modifier.clickable(onClick = onLabelClick) else Modifier
+        )
         Text(text = value, style = MaterialTheme.typography.bodyMedium, color = displayValueColor)
     }
 }
@@ -283,6 +332,121 @@ private fun PowerKeyValueRow(
 private fun formatWatts(value: Double): String = "${formatOneDecimal(value)} W"
 
 private fun formatOneDecimal(value: Double): String = "%.1f".format(value)
+
+private fun formatTwoDecimals(value: Double): String = "%.2f".format(value)
+
+private fun formatUptimeSeconds(seconds: Double): String {
+    if (seconds <= 0.0) return MissingValue
+    val totalSeconds = seconds.toLong()
+    val days = totalSeconds / 86_400
+    val hours = (totalSeconds % 86_400) / 3_600
+    val minutes = (totalSeconds % 3_600) / 60
+    return "${days}d ${hours}h ${minutes}m"
+}
+
+private fun buildFroniusDetailsRows(data: FroniusInverterData?, infoMessage: String?): List<PowerRow> {
+    if (data == null) {
+        return listOf(
+            PowerRow("=== FRONIUS INVERTER INFO ===", ""),
+            PowerRow("Status", "No Fronius data loaded")
+        )
+    }
+
+    val totalPv = data.pv1Power + data.pv2Power
+    return listOf(
+        PowerRow("=== FRONIUS INVERTER INFO ===", ""),
+        PowerRow("Model", data.model.orMissing()),
+        PowerRow("Status", data.deviceStatus.orMissing()),
+        PowerRow("Uptime", formatUptimeSeconds(data.uptime)),
+
+        PowerRow("=== SOLAR PV INPUT ===", ""),
+        PowerRow(
+            "PV1 Power",
+            "${formatOneDecimal(data.pv1Power)} W (${formatOneDecimal(data.pv1Voltage)} V x ${formatTwoDecimals(data.pv1Current)} A)"
+        ),
+        PowerRow(
+            "PV2 Power",
+            "${formatOneDecimal(data.pv2Power)} W (${formatOneDecimal(data.pv2Voltage)} V x ${formatTwoDecimals(data.pv2Current)} A)"
+        ),
+        PowerRow("Total PV", "${formatOneDecimal(totalPv)} W (${formatTwoDecimals(totalPv / 1000.0)} kW)"),
+
+        PowerRow("=== AC OUTPUT ===", ""),
+        PowerRow("Power", "${formatOneDecimal(data.currentPower)} W (${formatTwoDecimals(data.currentPower / 1000.0)} kW)"),
+        PowerRow("Voltage", "${formatOneDecimal(data.acVoltage)} V"),
+        PowerRow("Current", "${formatTwoDecimals(data.acCurrent)} A"),
+        PowerRow("Frequency", "${formatTwoDecimals(data.acFrequency)} Hz"),
+
+        PowerRow("=== GRID CONNECTION ===", ""),
+        PowerRow("Voltage", "${formatOneDecimal(data.gridVoltage)} V"),
+        PowerRow("Frequency", "${formatTwoDecimals(data.gridFrequency)} Hz"),
+
+        PowerRow("=== SYSTEM ===", ""),
+        PowerRow("Temperature", "${formatOneDecimal(data.ambientTemperature)} C"),
+
+        PowerRow("=== WARNINGS ===", ""),
+        PowerRow("Info", infoMessage.orMissing())
+    )
+}
+
+private fun buildGoodWeDetailsRows(data: GoodWeData?): List<PowerRow> {
+    val inverter = data?.inverterInfo
+    val battery = data?.batteryData
+    if (inverter == null && battery == null) {
+        return listOf(
+            PowerRow("=== INVERTER INFO ===", ""),
+            PowerRow("Status", "No GoodWe data loaded")
+        )
+    }
+
+    val gridPower = battery?.gridPower?.toDouble()
+    val gridDirection = when {
+        gridPower == null -> MissingValue
+        gridPower > 0 -> "Exporting"
+        gridPower < 0 -> "Importing"
+        else -> "Balanced"
+    }
+
+    return listOf(
+        PowerRow("=== INVERTER INFO ===", ""),
+        PowerRow("Model", inverter?.modelLine.orMissing()),
+        PowerRow("Serial", inverter?.serialLine.orMissing()),
+        PowerRow("Firmware", inverter?.firmwareLine.orMissing()),
+
+        PowerRow("=== SOLAR INPUT ===", ""),
+        PowerRow("PV1 Voltage", battery?.pv1Voltage?.let { "${formatOneDecimal(it)} V" }.orMissing()),
+        PowerRow("PV1 Current", battery?.pv1Current?.let { "${formatOneDecimal(it)} A" }.orMissing()),
+        PowerRow("PV1 Power", battery?.let { "${formatOneDecimal(it.pv1Voltage * it.pv1Current)} W" }.orMissing()),
+        PowerRow("PV2 Voltage", battery?.pv2Voltage?.let { "${formatOneDecimal(it)} V" }.orMissing()),
+        PowerRow("PV2 Current", battery?.pv2Current?.let { "${formatOneDecimal(it)} A" }.orMissing()),
+        PowerRow("PV2 Power", battery?.let { "${formatOneDecimal(it.pv2Voltage * it.pv2Current)} W" }.orMissing()),
+        PowerRow("Total PV Power", battery?.pvTotalPower?.let { "${formatOneDecimal(it)} W" }.orMissing()),
+
+        PowerRow("=== GRID ===", ""),
+        PowerRow(
+            "Grid Power",
+            if (gridPower == null) {
+                MissingValue
+            } else {
+                "${formatOneDecimal(kotlin.math.abs(gridPower))} W (${formatTwoDecimals(kotlin.math.abs(gridPower) / 1000.0)} kW) - $gridDirection"
+            }
+        ),
+
+        PowerRow("=== INVERTER OUTPUT ===", ""),
+        PowerRow("Output Voltage", battery?.inverterVoltage?.let { "${formatOneDecimal(it)} V" }.orMissing()),
+        PowerRow("Backup Voltage", battery?.backupVoltage?.let { "${formatOneDecimal(it)} V" }.orMissing()),
+
+        PowerRow("=== BATTERY STATUS ===", ""),
+        PowerRow("SOC", battery?.stateOfCharge?.let { "$it%" }.orMissing()),
+        PowerRow("Voltage", battery?.voltage?.let { "${formatOneDecimal(it)} V" }.orMissing()),
+        PowerRow("Current", battery?.current?.let { "${formatOneDecimal(it)} A" }.orMissing()),
+        PowerRow("Power", battery?.power?.let { "${formatOneDecimal(it)} W" }.orMissing()),
+        PowerRow("State", battery?.state.orMissing()),
+        PowerRow("Temperature", battery?.temperature?.let { "${formatOneDecimal(it)} C" }.orMissing()),
+        PowerRow("Health Index", battery?.healthIndex?.let { "$it%" }.orMissing()),
+        PowerRow("Charge Limit", battery?.chargeLimit?.let { "$it A" }.orMissing()),
+        PowerRow("Discharge Limit", battery?.dischargeLimit?.let { "$it A" }.orMissing())
+    )
+}
 
 private fun WeatherStation.settingValue(key: String): String =
     settings.firstOrNull { it.key.equals(key, ignoreCase = true) }?.value?.trim().orEmpty()
